@@ -48,9 +48,6 @@ from storage.store import store
 from utils.id_generator import generate_message_id
 from presence.presence_server import presence_server
 
-# 그룹 채팅 최대 인원 (12장 요구사항: 최대 100명)
-GROUP_MAX_MEMBERS = 100
-
 
 class ConnectionManager:
     """
@@ -71,9 +68,6 @@ class ConnectionManager:
 
     def disconnect(self, user_id: str, websocket: WebSocket) -> None:
         if user_id in self._connections:
-            self._connections[user_id].discard(websocket) if hasattr(
-                self._connections[user_id], "discard"
-            ) else None
             try:
                 self._connections[user_id].remove(websocket)
             except ValueError:
