@@ -17,6 +17,6 @@ python-multipart==0.0.9
 
 # 테스트 의존성
 pytest>=7.0
-pytest-asyncio>=0.23
-httpx>=0.24          # fastapi TestClient ASGI transport
-anyio[asyncio]>=4.0  # pytest-asyncio 백엔드
+pytest-timeout>=2.2  # 수신 대기 hang 방지
+httpx>=0.24          # e2e REST 클라이언트
+websockets>=12.0     # e2e WebSocket 클라이언트 (sync client, recv timeout)

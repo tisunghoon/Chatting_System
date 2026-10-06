@@ -10,13 +10,13 @@ WebSocket 채팅 서버
      서버가 클라이언트에게 비동기로 메시지를 push할 수 있어야 하기 때문.
 
 2. 메시지 처리 흐름 (1:1):
-   클라이언트A → 채팅서버 → ID 생성 → inbox 큐(B) → 키-값 저장소
+   클라이언트A → 채팅서버 → ID 생성 → 키-값 저장소
                                      → B가 온라인이면 즉시 WebSocket 전달
-                                     → B가 오프라인이면 inbox에만 보관
+                                     → 전달 못 했으면(오프라인) inbox 큐(B)에 보관
 
 3. 메시지 처리 흐름 (그룹):
-   클라이언트A → 채팅서버 → ID 생성 → 각 수신자 inbox 큐에 복사
-                                     → 온라인 수신자에게 즉시 WebSocket 전달
+   클라이언트A → 채팅서버 → ID 생성 → 온라인 수신자에게 즉시 WebSocket 전달
+                                     → 전달 못 한 수신자의 inbox 큐에 복사
 
 4. 여러 단말 동기화:
    - 각 단말은 cur_max_message_id를 추적
@@ -48,9 +48,6 @@ from storage.store import store
 from utils.id_generator import generate_message_id
 from presence.presence_server import presence_server
 
-# 그룹 채팅 최대 인원 (12장 요구사항: 최대 100명)
-GROUP_MAX_MEMBERS = 100
-
 
 class ConnectionManager:
     """
@@ -71,9 +68,6 @@ class ConnectionManager:
 
     def disconnect(self, user_id: str, websocket: WebSocket) -> None:
         if user_id in self._connections:
-            self._connections[user_id].discard(websocket) if hasattr(
-                self._connections[user_id], "discard"
-            ) else None
             try:
                 self._connections[user_id].remove(websocket)
             except ValueError:
@@ -81,25 +75,26 @@ class ConnectionManager:
             if not self._connections[user_id]:
                 del self._connections[user_id]
 
-    def is_online(self, user_id: str) -> bool:
-        return bool(self._connections.get(user_id))
-
-    async def send_to_user(self, user_id: str, payload: dict) -> None:
-        """사용자의 모든 단말에 메시지 전송 (여러 단말 동기화)"""
+    async def send_to_user(self, user_id: str, payload: dict) -> bool:
+        """사용자의 모든 단말에 메시지 전송 (여러 단말 동기화). 한 단말이라도 받았으면 True."""
         sockets = self._connections.get(user_id, [])
+        delivered = False
         dead = []
-        for ws in sockets:
+        for ws in list(sockets):
             try:
                 await ws.send_json(payload)
+                delivered = True
             except Exception:
                 dead.append(ws)
         for ws in dead:
             self.disconnect(user_id, ws)
+        return delivered
 
-    async def broadcast_to_users(self, user_ids: list[str], payload: dict) -> None:
-        """여러 사용자에게 동시 전송"""
+    async def broadcast_to_users(self, user_ids: list[str], payload: dict) -> list[bool]:
+        """여러 사용자에게 동시 전송. user_ids 순서대로 전달 여부를 돌려준다."""
         tasks = [self.send_to_user(uid, payload) for uid in user_ids]
-        await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        return [r is True for r in results]
 
 
 # 싱글톤
@@ -145,13 +140,11 @@ async def handle_send_message(sender_id: str, data: dict) -> None:
         # Step 4: 키-값 저장소에 영구 보관
         store.append_message(channel_key, message)
 
-        # Step 3 → 5a: 수신자 inbox 큐에 복사 후 즉시 전달 시도
-        store.push_inbox(recipient_id, message)
-
-        if manager.is_online(recipient_id):
-            # 5a: 수신자가 온라인 → 즉시 WebSocket 전달
-            await manager.send_to_user(recipient_id, message)
-        # else: 5b: 오프라인 → inbox에만 보관 (실제 운영: 푸시 알림 서버로 전달)
+        # 5a: 수신자가 온라인 → 즉시 WebSocket 전달
+        # 5b: 전달 못 했으면 inbox에 보관했다가 재접속 때 sync (실제 운영: 푸시 알림 서버로도 전달)
+        # 이미 받은 메시지까지 inbox에 넣으면 재접속 때 같은 메시지를 또 받게 된다.
+        if not await manager.send_to_user(recipient_id, message):
+            store.push_inbox(recipient_id, message)
 
         # 발신자의 다른 단말에도 동기화 (여러 단말 지원)
         await manager.send_to_user(sender_id, message)
@@ -181,13 +174,12 @@ async def handle_send_message(sender_id: str, data: dict) -> None:
         store.append_message(channel_key, message)
 
         # 12장 §소그룹 채팅 메시지 흐름:
-        # 발신자를 제외한 모든 수신자의 inbox 큐에 메시지 복사
+        # 온라인 수신자에게 즉시 전달하고, 받지 못한 수신자의 inbox 큐에만 복사
         recipients = [m for m in members if m != sender_id]
-        for recipient_id in recipients:
-            store.push_inbox(recipient_id, message)
-
-        # 온라인 수신자에게 즉시 전달
-        await manager.broadcast_to_users(recipients, message)
+        delivered = await manager.broadcast_to_users(recipients, message)
+        for recipient_id, ok in zip(recipients, delivered):
+            if not ok:
+                store.push_inbox(recipient_id, message)
         # 발신자의 모든 단말에도 전송
         await manager.send_to_user(sender_id, message)
 

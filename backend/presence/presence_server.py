@@ -85,24 +85,31 @@ class PresenceServer:
         """
         while True:
             await asyncio.sleep(HEARTBEAT_CHECK_INTERVAL)
-            now = time.time()
-            # 접속 중인 모든 사용자의 presence 검사
-            # (실제 운영에서는 Redis TTL로 처리)
-            users = store.get("_online_users", set())
-            expired = []
-            for uid in list(users):
-                presence = store.get(f"presence:{uid}")
-                if not presence:
-                    continue
-                if presence.get("status") == "online":
-                    last = presence.get("last_active", 0)
-                    if now - last > HEARTBEAT_TIMEOUT:
-                        expired.append(uid)
+            self.expire_stale()
 
-            for uid in expired:
-                self.user_offline(uid)
-                users.discard(uid)
-            store.set("_online_users", users)
+    def expire_stale(self) -> list[str]:
+        """
+        만료 검사 1회: 접속 중인 사용자 중 HEARTBEAT_TIMEOUT 동안 heartbeat가 없던
+        사용자를 오프라인으로 전환하고 그 목록을 반환한다.
+        (실제 운영에서는 Redis TTL로 처리)
+        """
+        now = time.time()
+        users = store.get("_online_users", set())
+        expired = []
+        for uid in list(users):
+            presence = store.get(f"presence:{uid}")
+            if not presence:
+                continue
+            if presence.get("status") == "online":
+                last = presence.get("last_active", 0)
+                if now - last > HEARTBEAT_TIMEOUT:
+                    expired.append(uid)
+
+        for uid in expired:
+            self.user_offline(uid)
+            users.discard(uid)
+        store.set("_online_users", users)
+        return expired
 
     def register_online(self, user_id: str) -> None:
         """온라인 사용자 집합에 등록 (만료 검사용)"""
