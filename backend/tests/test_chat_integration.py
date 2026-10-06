@@ -12,9 +12,11 @@ conftest가 띄운 실제 uvicorn 서버에 httpx(REST)와 websockets(WebSocket)
   (4) heartbeat 타임아웃 → 오프라인 전환
 """
 
+import asyncio
 import json
 import time
 
+import chat.chat_server as chat_mod
 import storage.store as store_mod
 import presence.presence_server as pres_mod
 
@@ -258,6 +260,26 @@ def test_group_inbox_only_for_offline_members(api, ws_connect):
         assert [m["content"] for m in sync["messages"]] == ["standup"]
 
 
+class _DeadSocket:
+    """연결은 등록돼 있지만 send에서 끊김이 드러나는 소켓."""
+
+    async def accept(self):
+        pass
+
+    async def send_json(self, payload):
+        raise RuntimeError("connection closed")
+
+
+def test_failed_delivery_falls_back_to_inbox():
+    """등록된 소켓으로 전송이 실패하면 그 메시지는 inbox에 남고 죽은 소켓은 정리된다."""
+    asyncio.run(chat_mod.manager.connect("bob", _DeadSocket()))
+
+    asyncio.run(chat_mod.handle_send_message("alice", {"to": "bob", "content": "lost?"}))
+
+    assert [m["content"] for m in store_mod.store.pop_inbox("bob")] == ["lost?"]
+    assert asyncio.run(chat_mod.manager.send_to_user("bob", {})) is False
+
+
 def test_sync_command_after_reconnect(api, ws_connect):
     """연결 시 inbox를 이미 비웠으므로 이후 sync 요청에는 돌려줄 메시지가 없다."""
     setup_users(api, "alice", "bob")
@@ -306,14 +328,18 @@ def test_heartbeat_keeps_online(api, ws_connect):
 
     with ws_connect("alice") as alice_ws:
         assert wait_for(lambda: presence_status("alice") == "online")
-        before = store_mod.store.get("presence:alice")["last_active"]
+
+        # 마지막 활동을 과거로 돌려 놓아야 heartbeat가 실제로 갱신했는지 구분된다
+        presence = store_mod.store.get("presence:alice")
+        presence["last_active"] = before = time.time() - 10
+        store_mod.store.set("presence:alice", presence)
 
         alice_ws.send(json.dumps({"type": "heartbeat"}))
         ack = recv_until(alice_ws, lambda m: m.get("type") == "heartbeat_ack")
         assert ack is not None, "heartbeat_ack 수신 실패"
 
         after = store_mod.store.get("presence:alice")["last_active"]
-        assert after >= before, "heartbeat 후 last_active 미갱신"
+        assert after > before, "heartbeat 후 last_active 미갱신"
         assert presence_status("alice") == "online"
 
 
