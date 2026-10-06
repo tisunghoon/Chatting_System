@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat System — 12장 토이 프로젝트</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
+
+    /* ── 헤더 ── */
+    header { background: #16213e; padding: 12px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #0f3460; }
+    header h1 { font-size: 18px; color: #e94560; }
+    #status-badge { font-size: 12px; padding: 2px 8px; border-radius: 12px; background: #333; color: #aaa; }
+    #status-badge.online { background: #1a472a; color: #4caf50; }
+
+    /* ── 메인 레이아웃 ── */
+    .container { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── 사이드바 ── */
+    .sidebar { width: 240px; background: #16213e; border-right: 1px solid #0f3460; display: flex; flex-direction: column; }
+    .sidebar-section { padding: 12px; border-bottom: 1px solid #0f3460; }
+    .sidebar-section h3 { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+    .friend-item, .channel-item { padding: 6px 8px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .friend-item:hover, .channel-item:hover { background: #0f3460; }
+    .friend-item.active, .channel-item.active { background: #e94560; color: #fff; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; flex-shrink: 0; }
+    .dot.online { background: #4caf50; }
+
+    /* ── 로그인 패널 ── */
+    #login-panel { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .login-box { background: #16213e; border: 1px solid #0f3460; border-radius: 12px; padding: 32px; width: 340px; }
+    .login-box h2 { color: #e94560; margin-bottom: 20px; text-align: center; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 20px; }
+    .tab { flex: 1; padding: 8px; background: #1a1a2e; border: none; color: #888; cursor: pointer; border-radius: 6px; font-size: 14px; }
+    .tab.active { background: #0f3460; color: #e0e0e0; }
+    input { width: 100%; padding: 10px 12px; background: #1a1a2e; border: 1px solid #0f3460; color: #e0e0e0; border-radius: 6px; margin-bottom: 10px; font-size: 14px; }
+    input:focus { outline: none; border-color: #e94560; }
+    button.primary { width: 100%; padding: 10px; background: #e94560; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; }
+    button.primary:hover { background: #c73652; }
+    .error-msg { color: #e94560; font-size: 12px; margin-top: 6px; min-height: 16px; }
+
+    /* ── 채팅 영역 ── */
+    .chat-area { flex: 1; display: flex; flex-direction: column; }
+    .chat-header { padding: 12px 20px; background: #16213e; border-bottom: 1px solid #0f3460; font-size: 15px; font-weight: 600; }
+    .messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+    .message { max-width: 70%; padding: 8px 12px; border-radius: 10px; font-size: 14px; line-height: 1.4; }
+    .message.mine { background: #e94560; color: #fff; align-self: flex-end; border-bottom-right-radius: 3px; }
+    .message.theirs { background: #1e3a5f; color: #e0e0e0; align-self: flex-start; border-bottom-left-radius: 3px; }
+    .message .meta { font-size: 11px; opacity: 0.7; margin-bottom: 2px; }
+    .message-input-row { padding: 12px 16px; display: flex; gap: 8px; background: #16213e; border-top: 1px solid #0f3460; }
+    .message-input-row input { flex: 1; margin: 0; }
+    .message-input-row button { padding: 10px 16px; background: #e94560; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    .empty-state { flex: 1; display: flex; align-items: center; justify-content: center; color: #555; font-size: 14px; }
+
+    /* ── 그룹 채널 생성 ── */
+    .sidebar-add { padding: 8px; }
+    .btn-small { padding: 6px 10px; background: #0f3460; color: #aaa; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; width: 100%; }
+    .btn-small:hover { background: #1a4a80; color: #e0e0e0; }
+
+    /* ── 친구 추가 ── */
+    .add-row { display: flex; gap: 4px; margin-top: 6px; }
+    .add-row input { margin: 0; flex: 1; padding: 6px 8px; font-size: 13px; }
+    .add-row button { padding: 6px 10px; background: #0f3460; color: #aaa; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
+
+    /* ── 모달 ── */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 50; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: #16213e; border: 1px solid #0f3460; border-radius: 12px; padding: 24px; width: 320px; }
+    .modal h3 { margin-bottom: 16px; color: #e94560; }
+    .modal button.close { background: #333; margin-top: 8px; }
+  </style>
+</head>
+<body>
+
+<!-- ── 로그인 패널 ── -->
+<div id="login-panel">
+  <div class="login-box">
+    <h2>💬 Chat System</h2>
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('login')">로그인</button>
+      <button class="tab" onclick="switchTab('register')">회원가입</button>
+    </div>
+    <div id="form-login">
+      <input id="login-userid" placeholder="User ID" autocomplete="off" />
+      <input id="login-password" type="password" placeholder="비밀번호" />
+      <button class="primary" onclick="doLogin()">로그인</button>
+    </div>
+    <div id="form-register" style="display:none">
+      <input id="reg-userid" placeholder="User ID (영문/숫자)" autocomplete="off" />
+      <input id="reg-username" placeholder="닉네임" />
+      <input id="reg-password" type="password" placeholder="비밀번호" />
+      <button class="primary" onclick="doRegister()">가입하기</button>
+    </div>
+    <div class="error-msg" id="auth-error"></div>
+  </div>
+</div>
+
+<!-- ── 그룹 채널 생성 모달 ── -->
+<div class="modal-overlay" id="channel-modal">
+  <div class="modal">
+    <h3>그룹 채널 만들기</h3>
+    <input id="ch-id" placeholder="채널 ID (영문/숫자)" />
+    <input id="ch-name" placeholder="채널 이름" />
+    <input id="ch-members" placeholder="초대할 User ID (쉼표 구분)" />
+    <button class="primary" onclick="doCreateChannel()">만들기</button>
+    <button class="btn-small close" onclick="closeModal()">취소</button>
+    <div class="error-msg" id="ch-error"></div>
+  </div>
+</div>
+
+<!-- ── 메인 UI ── -->
+<header>
+  <h1>💬 Chat System</h1>
+  <span id="status-badge">●  연결 중...</span>
+  <span id="my-name" style="margin-left:auto; color:#888; font-size:13px"></span>
+</header>
+
+<div class="container">
+  <!-- ── 사이드바 ── -->
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <h3>친구</h3>
+      <div id="friend-list"></div>
+      <div class="add-row">
+        <input id="add-friend-input" placeholder="User ID 입력" />
+        <button onclick="addFriend()">+</button>
+      </div>
+    </div>
+    <div class="sidebar-section" style="flex:1; overflow-y:auto">
+      <h3>그룹 채널</h3>
+      <div id="channel-list"></div>
+      <div class="sidebar-add">
+        <button class="btn-small" onclick="openModal()">+ 채널 만들기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 채팅 영역 ── -->
+  <div class="chat-area">
+    <div class="chat-header" id="chat-title">채팅 상대를 선택하세요</div>
+    <div class="messages" id="messages">
+      <div class="empty-state">👈 왼쪽에서 친구 또는 채널을 선택하세요</div>
+    </div>
+    <div class="message-input-row">
+      <input id="msg-input" placeholder="메시지를 입력하세요..." onkeydown="onKey(event)" disabled />
+      <button onclick="sendMessage()" id="send-btn" disabled>전송</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── 상태 ───────────────────────────────────────────────────────────────────
+const API = 'http://localhost:8000';
+let token = '';
+let myId = '';
+let myName = '';
+let ws = null;
+let heartbeatTimer = null;
+
+// 현재 열린 채팅 (type: 'dm'|'group', id: 상대방ID or 채널ID)
+let currentChat = null;
+
+// 메시지 캐시: channelKey → [message]
+const msgCache = {};
+
+// 마지막으로 받은 message_id (단말 동기화용 cur_max_message_id)
+let curMaxMessageId = 0;
+
+// 접속 상태 (친구 목록)
+const presenceMap = {};
+
+// ─── 인증 ───────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.getElementById('form-login').style.display = tab === 'login' ? '' : 'none';
+  document.getElementById('form-register').style.display = tab === 'register' ? '' : 'none';
+  document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', (tab==='login'?0:1)===i));
+  document.getElementById('auth-error').textContent = '';
+}
+
+async function doRegister() {
+  const userId = document.getElementById('reg-userid').value.trim();
+  const username = document.getElementById('reg-username').value.trim();
+  const password = document.getElementById('reg-password').value;
+  if (!userId || !username || !password) { showAuthError('모든 항목을 입력하세요'); return; }
+
+  const res = await fetch(`${API}/api/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, username, password }),
+  });
+  const data = await res.json();
+  if (!res.ok) { showAuthError(data.detail || '오류 발생'); return; }
+  showAuthError('가입 완료! 로그인하세요', true);
+  switchTab('login');
+  document.getElementById('login-userid').value = userId;
+}
+
+async function doLogin() {
+  const userId = document.getElementById('login-userid').value.trim();
+  const password = document.getElementById('login-password').value;
+  if (!userId || !password) { showAuthError('아이디와 비밀번호를 입력하세요'); return; }
+
+  const res = await fetch(`${API}/api/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, password }),
+  });
+  const data = await res.json();
+  if (!res.ok) { showAuthError(data.detail || '로그인 실패'); return; }
+
+  token = data.token;
+  myId = data.user_id;
+  myName = data.username;
+  document.getElementById('login-panel').style.display = 'none';
+  document.getElementById('my-name').textContent = `${myName} (${myId})`;
+
+  connectWebSocket(data.chat_server_url);
+  await loadFriends();
+}
+
+function showAuthError(msg, isSuccess = false) {
+  const el = document.getElementById('auth-error');
+  el.textContent = msg;
+  el.style.color = isSuccess ? '#4caf50' : '#e94560';
+}
+
+// ─── WebSocket ──────────────────────────────────────────────────────────────
+function connectWebSocket(wsUrl) {
+  // 12장: 로그인 후 chat_server_url로 WebSocket 연결
+  ws = new WebSocket(`${wsUrl}/${myId}`);
+
+  ws.onopen = () => {
+    setBadge('online');
+    // 연결 즉시 미수신 메시지 동기화 (cur_max_message_id 이후)
+    ws.send(JSON.stringify({ type: 'sync', after_id: curMaxMessageId }));
+    // 하트비트: 5초마다 전송 (12장 §접속 장애)
+    heartbeatTimer = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'heartbeat' }));
+      }
+    }, 5000);
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    handleWsMessage(msg);
+  };
+
+  ws.onclose = () => {
+    setBadge('offline');
+    clearInterval(heartbeatTimer);
+    // 5초 후 재연결 시도
+    setTimeout(() => connectWebSocket(wsUrl), 5000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+function handleWsMessage(msg) {
+  switch (msg.type) {
+    case 'message':
+      receiveMessage(msg);
+      break;
+    case 'sync_response':
+      // 미수신 메시지 일괄 수신
+      (msg.messages || []).forEach(m => receiveMessage(m));
+      break;
+    case 'presence':
+      // 친구 접속 상태 업데이트
+      presenceMap[msg.user_id] = msg.status;
+      renderFriendList();
+      break;
+    case 'heartbeat_ack':
+      // 서버 확인 응답 (UI 표시 불필요)
+      break;
+    case 'error':
+      console.error('WS error:', msg.message);
+      break;
+  }
+}
+
+function receiveMessage(msg) {
+  // cur_max_message_id 갱신 (단말 동기화)
+  if (msg.message_id > curMaxMessageId) curMaxMessageId = msg.message_id;
+
+  const key = msg.channel_key;
+  if (!msgCache[key]) msgCache[key] = [];
+  // 중복 방지
+  if (!msgCache[key].find(m => m.message_id === msg.message_id)) {
+    msgCache[key].push(msg);
+    msgCache[key].sort((a, b) => a.message_id - b.message_id);
+  }
+
+  // 현재 열린 채팅이면 즉시 렌더링
+  if (currentChat) {
+    const activeKey = currentChat.type === 'dm'
+      ? 'dm:' + [myId, currentChat.id].sort().join(':')
+      : `group:${currentChat.id}`;
+    if (activeKey === key) renderMessages(key);
+  }
+}
+
+// ─── 채팅 선택 ──────────────────────────────────────────────────────────────
+function openDM(friendId, friendName) {
+  currentChat = { type: 'dm', id: friendId, name: friendName };
+  document.getElementById('chat-title').textContent = `💬 ${friendName} (${friendId})`;
+  enableInput();
+  highlightActive('friend', friendId);
+  const key = 'dm:' + [myId, friendId].sort().join(':');
+  if (!msgCache[key]) {
+    // 서버에서 이력 로드
+    loadDMHistory(friendId, key);
+  } else {
+    renderMessages(key);
+  }
+}
+
+function openChannel(channelId, channelName) {
+  currentChat = { type: 'group', id: channelId, name: channelName };
+  document.getElementById('chat-title').textContent = `# ${channelName}`;
+  enableInput();
+  highlightActive('channel', channelId);
+  const key = `group:${channelId}`;
+  if (!msgCache[key]) {
+    loadChannelHistory(channelId, key);
+  } else {
+    renderMessages(key);
+  }
+}
+
+async function loadDMHistory(friendId, key) {
+  const res = await apiGet(`/api/dm/${friendId}/messages`);
+  if (res) {
+    msgCache[key] = res.messages || [];
+    renderMessages(key);
+  }
+}
+
+async function loadChannelHistory(channelId, key) {
+  const res = await apiGet(`/api/channels/${channelId}/messages`);
+  if (res) {
+    msgCache[key] = res.messages || [];
+    renderMessages(key);
+  }
+}
+
+// ─── 메시지 전송 ─────────────────────────────────────────────────────────────
+function sendMessage() {
+  if (!currentChat || !ws || ws.readyState !== WebSocket.OPEN) return;
+  const input = document.getElementById('msg-input');
+  const content = input.value.trim();
+  if (!content) return;
+
+  const payload = currentChat.type === 'dm'
+    ? { type: 'send_message', to: currentChat.id, content }
+    : { type: 'send_message', channel_id: currentChat.id, content };
+
+  ws.send(JSON.stringify(payload));
+  input.value = '';
+}
+
+function onKey(e) {
+  if (e.key === 'Enter') sendMessage();
+}
+
+// ─── 렌더링 ─────────────────────────────────────────────────────────────────
+function renderMessages(key) {
+  const container = document.getElementById('messages');
+  const msgs = msgCache[key] || [];
+  container.innerHTML = msgs.map(m => {
+    const isMine = m.from === myId;
+    const sender = isMine ? '나' : (m.from || '');
+    return `
+      <div class="message ${isMine ? 'mine' : 'theirs'}">
+        ${!isMine ? `<div class="meta">${sender}</div>` : ''}
+        ${escapeHtml(m.content)}
+      </div>`;
+  }).join('') || '<div class="empty-state">아직 메시지가 없습니다</div>';
+  container.scrollTop = container.scrollHeight;
+}
+
+// ─── 친구 목록 ──────────────────────────────────────────────────────────────
+async function loadFriends() {
+  const data = await apiGet('/api/friends');
+  if (!data) return;
+  const list = document.getElementById('friend-list');
+  list.innerHTML = (data.friends || []).map(f => `
+    <div class="friend-item" id="friend-${f.user_id}" onclick="openDM('${f.user_id}', '${escapeHtml(f.username)}')">
+      <span class="dot ${f.status === 'online' ? 'online' : ''}"></span>
+      <span>${escapeHtml(f.username)}</span>
+    </div>
+  `).join('');
+}
+
+function renderFriendList() {
+  document.querySelectorAll('[id^="friend-"]').forEach(el => {
+    const uid = el.id.replace('friend-', '');
+    const dot = el.querySelector('.dot');
+    if (dot) dot.className = `dot ${presenceMap[uid] === 'online' ? 'online' : ''}`;
+  });
+}
+
+async function addFriend() {
+  const input = document.getElementById('add-friend-input');
+  const friendId = input.value.trim();
+  if (!friendId) return;
+  const res = await fetch(`${API}/api/friends`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ friend_id: friendId }),
+  });
+  if (res.ok) { input.value = ''; await loadFriends(); }
+  else { const d = await res.json(); alert(d.detail || '친구 추가 실패'); }
+}
+
+// ─── 채널 관리 ──────────────────────────────────────────────────────────────
+function openModal() { document.getElementById('channel-modal').classList.add('open'); }
+function closeModal() { document.getElementById('channel-modal').classList.remove('open'); }
+
+async function doCreateChannel() {
+  const chId = document.getElementById('ch-id').value.trim();
+  const chName = document.getElementById('ch-name').value.trim();
+  const members = document.getElementById('ch-members').value.split(',').map(s => s.trim()).filter(Boolean);
+  if (!chId || !chName) { document.getElementById('ch-error').textContent = '채널 ID와 이름을 입력하세요'; return; }
+
+  const res = await fetch(`${API}/api/channels`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ channel_id: chId, name: chName, members }),
+  });
+  const data = await res.json();
+  if (!res.ok) { document.getElementById('ch-error').textContent = data.detail || '오류'; return; }
+  closeModal();
+  addChannelToList(chId, chName);
+}
+
+function addChannelToList(channelId, channelName) {
+  const list = document.getElementById('channel-list');
+  const existing = document.getElementById(`channel-${channelId}`);
+  if (existing) return;
+  const el = document.createElement('div');
+  el.className = 'channel-item';
+  el.id = `channel-${channelId}`;
+  el.onclick = () => openChannel(channelId, channelName);
+  el.innerHTML = `<span>#</span><span>${escapeHtml(channelName)}</span>`;
+  list.appendChild(el);
+}
+
+// ─── UI 유틸 ────────────────────────────────────────────────────────────────
+function setBadge(state) {
+  const badge = document.getElementById('status-badge');
+  badge.textContent = state === 'online' ? '●  온라인' : '●  오프라인';
+  badge.className = `status-badge ${state}`;
+  badge.id = 'status-badge';
+}
+
+function enableInput() {
+  document.getElementById('msg-input').disabled = false;
+  document.getElementById('send-btn').disabled = false;
+}
+
+function highlightActive(type, id) {
+  document.querySelectorAll('.friend-item, .channel-item').forEach(el => el.classList.remove('active'));
+  const el = document.getElementById(`${type === 'dm' ? 'friend' : 'channel'}-${id}`);
+  if (el) el.classList.add('active');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── API 헬퍼 ────────────────────────────────────────────────────────────────
+async function apiGet(path) {
+  try {
+    const res = await fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+</script>
+</body>
+</html>

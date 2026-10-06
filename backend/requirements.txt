@@ -1,0 +1,22 @@
+# 채팅 시스템 의존성
+#
+# fastapi        - REST API 서버 (로그인, 회원가입, 프로파일)
+# uvicorn        - ASGI 서버 (WebSocket 지원)
+# websockets     - WebSocket 프로토콜 (uvicorn이 내부적으로 사용)
+# python-jose    - JWT 토큰 기반 인증
+# passlib        - 비밀번호 해싱 (bcrypt)
+# pydantic       - 데이터 모델 검증
+# python-multipart - form data 파싱 (로그인 form 지원)
+
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+pydantic==2.7.1
+python-multipart==0.0.9
+
+# 테스트 의존성
+pytest>=7.0
+pytest-asyncio>=0.23
+httpx>=0.24          # fastapi TestClient ASGI transport
+anyio[asyncio]>=4.0  # pytest-asyncio 백엔드
