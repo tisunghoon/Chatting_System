@@ -225,6 +225,39 @@ def test_offline_inbox_not_duplicated(api, ws_connect):
         assert msgs == [], f"inbox가 비워지지 않음 (중복 수신): {msgs}"
 
 
+def test_live_dm_not_redelivered_on_reconnect(api, ws_connect):
+    """온라인일 때 실시간으로 받은 DM은 재접속 시 sync_response로 다시 오지 않는다."""
+    setup_users(api, "alice", "bob")
+
+    with ws_connect("alice") as alice_ws, ws_connect("bob") as bob_ws:
+        alice_ws.send(json.dumps({"type": "send_message", "to": "bob", "content": "live"}))
+        assert recv_until(bob_ws, is_message) is not None
+
+    with ws_connect("bob") as bob_ws:
+        msgs = recv_all(bob_ws, 0.5)
+        assert msgs == [], f"이미 받은 메시지가 재전달됨: {msgs}"
+
+
+def test_group_inbox_only_for_offline_members(api, ws_connect):
+    """그룹 메시지는 온라인 멤버에게는 실시간으로만, 오프라인 멤버에게는 inbox로 간다."""
+    tokens = setup_users(api, "alice", "bob", "carol")
+    api.post("/api/channels", json={
+        "channel_id": "team", "name": "Team", "members": ["bob", "carol"],
+    }, headers=auth(tokens["alice"]))
+
+    with ws_connect("alice") as alice_ws, ws_connect("bob") as bob_ws:
+        alice_ws.send(json.dumps({"type": "send_message", "channel_id": "team", "content": "standup"}))
+        assert recv_until(bob_ws, is_message) is not None
+
+    with ws_connect("bob") as bob_ws:
+        assert recv_all(bob_ws, 0.5) == [], "온라인으로 받은 그룹 메시지가 재전달됨"
+
+    with ws_connect("carol") as carol_ws:
+        sync = recv_until(carol_ws, lambda m: m.get("type") == "sync_response")
+        assert sync is not None, "오프라인이던 carol이 inbox 메시지를 받지 못함"
+        assert [m["content"] for m in sync["messages"]] == ["standup"]
+
+
 def test_sync_command_after_reconnect(api, ws_connect):
     """연결 시 inbox를 이미 비웠으므로 이후 sync 요청에는 돌려줄 메시지가 없다."""
     setup_users(api, "alice", "bob")
