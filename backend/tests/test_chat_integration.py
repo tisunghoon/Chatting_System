@@ -290,21 +290,13 @@ def test_heartbeat_timeout(api, ws_connect, monkeypatch):
     with ws_connect("alice"):
         assert wait_for(lambda: presence_status("alice") == "online")
 
+        assert pres_mod.presence_server.expire_stale() == [], "방금 접속한 사용자가 만료됨"
+
         presence = store_mod.store.get("presence:alice")
         presence["last_active"] = time.time() - 3
         store_mod.store.set("presence:alice", presence)
 
-        now = time.time()
-        users = store_mod.store.get("_online_users", set())
-        for uid in list(users):
-            p = store_mod.store.get(f"presence:{uid}")
-            if p and p.get("status") == "online":
-                last = p.get("last_active", 0)
-                if now - last > pres_mod.HEARTBEAT_TIMEOUT:
-                    pres_mod.presence_server.user_offline(uid)
-                    users.discard(uid)
-        store_mod.store.set("_online_users", users)
-
+        assert pres_mod.presence_server.expire_stale() == ["alice"]
         assert presence_status("alice") == "offline"
 
 
@@ -334,6 +326,27 @@ def test_presence_goes_offline_on_disconnect(api, ws_connect):
 
     assert wait_for(lambda: presence_status("alice") == "offline"), \
         f"연결 해제 후에도 상태가 {presence_status('alice')}"
+
+
+def test_presence_event_sent_to_friends(api, ws_connect):
+    """친구가 접속하거나 나가면 presence 이벤트를 받고, 친구가 아니면 받지 않는다."""
+    tokens = setup_users(api, "alice", "bob", "carol")
+    r = api.post("/api/friends", json={"friend_id": "bob"}, headers=auth(tokens["alice"]))
+    assert r.status_code == 200
+
+    def is_presence(m: dict) -> bool:
+        return m.get("type") == "presence"
+
+    with ws_connect("bob") as bob_ws, ws_connect("carol") as carol_ws:
+        with ws_connect("alice"):
+            online = recv_until(bob_ws, is_presence)
+            assert online == {"type": "presence", "user_id": "alice", "status": "online"}
+
+        offline = recv_until(bob_ws, is_presence)
+        assert offline == {"type": "presence", "user_id": "alice", "status": "offline"}
+
+        assert not any(is_presence(m) for m in recv_all(carol_ws, 0.3)), \
+            "친구가 아닌 carol에게 presence 이벤트가 전달됨"
 
 
 # ─── 보조 테스트 ───────────────────────────────────────────────────────────────
